@@ -1,0 +1,53 @@
+version: 2
+
+models:
+  - name: stg_awards
+    description: Typed, renamed award records with the primary key and quality flag applied.
+    columns:
+      - name: award_uid
+        description: Real primary key (generated_internal_id) — Award ID alone is not unique. See README.
+        tests:
+          - unique
+          - not_null
+
+  - name: dim_recipients
+    description: One row per unique recipient.
+    columns:
+      - name: recipient_id
+        tests:
+          - unique
+          - not_null
+      - name: recipient_name
+        tests:
+          - unique
+          - not_null
+
+  - name: dim_agencies
+    description: One row per unique awarding agency / sub-agency pair.
+    columns:
+      - name: agency_id
+        tests:
+          - unique
+          - not_null
+
+  - name: fact_awards
+    description: One row per award — keys and measures only.
+    columns:
+      - name: award_uid
+        tests:
+          - unique
+          - not_null
+      - name: recipient_id
+        description: Must resolve to dim_recipients — a null here means the join failed silently.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_recipients')
+              field: recipient_id
+      - name: agency_id
+        description: Must resolve to dim_agencies — a null here means the join failed silently.
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_agencies')
+              field: agency_id

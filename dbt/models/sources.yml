@@ -1,0 +1,12 @@
+version: 2
+
+sources:
+  - name: raw
+    schema: main
+    description: >
+      Untransformed data loaded directly from the USAspending API pull.
+      Loaded by src/load_raw_to_duckdb.py — dbt does not touch this
+      table, only reads from it.
+    tables:
+      - name: raw_awards
+        description: One row per award record exactly as returned by the API.
