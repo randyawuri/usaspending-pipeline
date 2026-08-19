@@ -22,6 +22,10 @@ dbt/target/
 dbt/dbt_packages/
 dbt/logs/
 
+# Airflow
+airflow_venv/
+airflow_home/
+
 # IDE
 .vscode/settings.json
 .idea/

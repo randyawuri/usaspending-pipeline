@@ -1,0 +1,13 @@
+# Installed into a SEPARATE venv from the main project (see README
+# "Orchestration" section for why). Airflow's dependency tree is large
+# and tightly pinned; keeping it isolated avoids conflicts with
+# dbt-core / duckdb / pandas in the main project venv.
+#
+# Install with:
+#   pip install "apache-airflow" --constraint \
+#     "https://raw.githubusercontent.com/apache/airflow/constraints-latest/constraints-3.12.txt"
+#
+# (Airflow is installed via its constraints file rather than pinned
+# here directly — this is Airflow's own recommended install method,
+# since a plain requirements.txt pin doesn't resolve its dependency
+# tree reliably.)

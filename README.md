@@ -235,6 +235,73 @@ use, and it does buy real things even here:
   of a one-off Python check — same safeguard, enforced automatically
   on every build.
 
+## Orchestration (Airflow)
+
+The full chain (fetch → count-check → validate → load → dbt build) is
+orchestrated as a single Airflow DAG (`dags/usaspending_pipeline_dag.py`)
+instead of being run as a manual sequence of commands.
+
+### Why Airflow gets its own venv
+
+Airflow has a large, tightly-pinned dependency tree that regularly
+conflicts with other Python packages. Rather than install it into the
+main project venv (risking dependency conflicts with dbt-core, duckdb,
+pandas), it lives in a **separate** venv. Each Airflow task then shells
+out to the *project's* venv (its Python interpreter, its dbt binary) as
+a subprocess — Airflow orchestrates, but doesn't do the actual work in
+its own environment. This is a standard real-world pattern, not just a
+workaround for this project.
+
+### Setup
+
+```bash
+# 1. Separate venv for Airflow only
+python3.12 -m venv airflow_venv
+source airflow_venv/bin/activate
+pip install "apache-airflow" --constraint \
+  "https://raw.githubusercontent.com/apache/airflow/constraints-latest/constraints-3.12.txt"
+
+# 2. Point Airflow at this project's dags/ folder and a local AIRFLOW_HOME
+#    (keeps everything self-contained inside the project, same reasoning
+#    as dbt's local profiles.yml)
+export AIRFLOW_HOME=$(pwd)/airflow_home
+export AIRFLOW__CORE__DAGS_FOLDER=$(pwd)/dags
+
+# 3. Tell the DAG where the *project* venv lives (used to invoke
+#    the actual pipeline scripts and dbt — see dags/usaspending_pipeline_dag.py)
+export USASPENDING_PROJECT_ROOT=$(pwd)
+
+# 4. Start Airflow (webserver + scheduler in one process — fine for
+#    local/learning use; not how you'd run it in production)
+airflow standalone
+```
+
+`airflow standalone` prints an admin username/password on first run —
+log into the UI (usually `http://localhost:8080`), find `usaspending_pipeline`
+in the DAG list, and trigger it manually (the DAG has `schedule=None` —
+see design notes in the DAG file for why).
+
+### Design notes
+
+- **`schedule=None`**: this pipeline pulls a fixed historical fiscal
+  year, not a rolling/live window — there's no natural "run every day"
+  cadence for FY2023 data that won't change. A pipeline pulling a
+  rolling window (e.g. "last 30 days of activity") would use a real
+  schedule (`@daily`, etc.) instead; noted in the DAG file so the
+  choice reads as deliberate, not an oversight.
+- **`validate_raw` doesn't hard-fail the DAG.** The script always exits
+  0 — it's a reporting step. The known `end_date < start_date` issue is
+  already handled downstream via the `data_quality_flag` column (see
+  design notes above), so it shouldn't halt the pipeline. A more
+  mature version of this DAG would likely split validation into a
+  hard-fail branch (primary key uniqueness, negative amounts — genuine
+  blockers) and a soft-warn branch (known, already-handled issues) —
+  noted as a real next improvement rather than an oversight.
+- **`retries=1` / `retry_delay=2min`** on every task — a basic,
+  deliberate resilience choice given this hits an external API and
+  a local database; not tuned further since this project doesn't yet
+  have failure patterns to tune against.
+
 ## Known limitations
 
 - **`spending_by_award` does not populate several expected fields**
@@ -277,9 +344,12 @@ use, and it does buy real things even here:
 │   │   ├── staging/    # stg_awards, sources.yml
 │   │   └── marts/      # dim_recipients, dim_agencies, fact_awards, schema.yml
 │   └── tests/          # singular tests (e.g. no_negative_award_amounts.sql)
-├── data/raw/           # raw pulled data (gitignored)
-├── notebooks/          # scratch exploration, not production code
-├── tests/              # tests for Python pipeline logic
-├── requirements.txt
+├── dags/                # Airflow DAG orchestrating the full chain
+│   └── usaspending_pipeline_dag.py
+├── data/raw/            # raw pulled data (gitignored)
+├── notebooks/           # scratch exploration, not production code
+├── tests/               # tests for Python pipeline logic
+├── requirements.txt          # main project deps (fetch/validate/load + dbt)
+├── requirements-airflow.txt  # Airflow deps — separate venv, see "Orchestration"
 └── .env.example
 ```
