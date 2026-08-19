@@ -48,18 +48,6 @@ Output lands in `data/raw/` as JSON (gitignored — not committed).
 
 ## Design notes / decisions
 
-<!--
-Use this section as you go to record *why* you made choices, not just what
-they are. This is the part that actually demonstrates engineering judgment
-to anyone reviewing the project later (including future you).
-
-Example format:
-### Why raw JSON before any database?
-Keeping an unmodified raw layer means I can always re-derive the cleaned
-data without re-hitting the API. Standard pattern in real pipelines
-(raw → staged → modeled).
--->
-
 ### Why "Award Type" is excluded from the fields request
 
 Confirmed by inspecting the raw output: `spending_by_award` returns `null`
@@ -191,6 +179,7 @@ python src/validate_raw.py
 Run the full chain:
 ```bash
 python src/fetch_usaspending.py
+python src/check_true_count.py                                # confirm the pull is complete, not capped
 python src/validate_raw.py                                    # review before proceeding
 python src/load_raw_to_duckdb.py
 cd dbt && dbt build --profiles-dir . && cd ..
@@ -264,6 +253,18 @@ use, and it does buy real things even here:
   limit. For agency/date-range combinations that may exceed this,
   the pipeline will need to use the bulk download endpoint
   (`POST /api/v2/download/awards/`) instead — not yet implemented.
+  **Update:** re-checked after the `date_type` fix (see design notes)
+  using `spending_by_award_count`, a lightweight endpoint that returns
+  the true total independent of pagination. For the current scope
+  (NASA, FY2023 activity, contracts A–D), the true total is exactly
+  5,745 — matching the pull exactly. The cap was real, but this
+  specific pull is not truncated; the earlier `date_type` fix appears
+  to have resolved it as a side effect, confirmed rather than assumed.
+  **This will not hold for every future pull** — a larger agency,
+  wider date range, or broader award-type scope could still exceed
+  10,000. Before trusting any new pull as complete, run
+  `check_true_count.py` first (or add it as a standard pre-fetch step)
+  rather than assuming this result generalizes.
 
 ## Project structure
 
