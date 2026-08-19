@@ -1,24 +1,68 @@
 # USAspending Pipeline
 
-An end-to-end data pipeline that pulls federal award/spending data from the
-[USAspending.gov API](https://api.usaspending.gov), lands it raw, transforms
-it into a clean relational model, and (eventually) orchestrates the whole
-thing on a schedule.
+An end-to-end data pipeline that pulls federal contract spending data
+from the [USAspending.gov API](https://api.usaspending.gov), validates
+it, models it into a proper dimensional structure with dbt, and
+orchestrates the whole thing with Airflow.
 
-Built as a learning project to practice real data engineering patterns:
-API ingestion, pagination, raw/staged/modeled data layers, dimensional
-modeling, and pipeline orchestration.
+Built as a self-taught learning project — but more importantly, as a
+record of a real investigation. The API's raw data looked clean at
+first glance and wasn't: a silently null field, a date filter that
+matched on the wrong thing, an ID that turned out not to be unique, and
+a hard record cap that was easy to miss. Every one of those got found,
+diagnosed, and fixed — and the reasoning behind each decision is
+documented inline as it happened, not written up after the fact. See
+**Design notes** below for the full story.
 
 ## Status
 
-🚧 In progress — currently at the raw ingestion stage.
+✅ Complete — raw ingestion, validation, dimensional modeling (dbt),
+and orchestration (Airflow) all working end-to-end.
 
-## Architecture (planned)
+## Architecture
 
 ```
-USAspending API → raw JSON (data/raw/) → staged/cleaned tables (Postgres/DuckDB)
-                → dbt models (fact/dimension) → orchestrated with Airflow
+USAspending API
+      │  (fetch_usaspending.py)
+      ▼
+raw JSON (data/raw/)
+      │  (check_true_count.py, validate_raw.py — verify completeness & quality)
+      │  (load_raw_to_duckdb.py — raw load, untransformed)
+      ▼
+raw_awards (DuckDB)
+      │  (dbt: stg_awards — typing, renaming, quality flag)
+      ▼
+stg_awards
+      │  (dbt: dimensional split)
+      ▼
+dim_recipients ─┐
+dim_agencies ───┼──▶ fact_awards
+      │
+      ▼
+dbt tests (uniqueness, not-null, referential integrity) — all passing
+
+Orchestrated end-to-end by Airflow (dags/usaspending_pipeline_dag.py):
+fetch → count-check → validate → load → dbt build
 ```
+
+## What this project demonstrates
+
+- **Investigating data instead of trusting it.** Several issues here
+  (a null field, mismatched date semantics, a non-unique "unique" ID,
+  a silent 10,000-record API cap) were invisible at a glance and only
+  surfaced through systematic inspection — see Design notes for how
+  each was found and resolved.
+- **Deliberate, documented tradeoffs**, not just working code — e.g.
+  flagging bad records instead of silently dropping them, and writing
+  down *why* at the time the decision was made.
+- **A real ingestion → validation → modeling → orchestration
+  pipeline**, using the standard tools for each layer (Python for
+  ingestion, dbt for transformation/testing, Airflow for
+  orchestration) rather than one script doing everything.
+- **Environment and tooling problems solved along the way** — a
+  Python-version-related native extension crash, dbt path/schema
+  resolution issues, and an Airflow dependency build failure — each
+  diagnosed methodically rather than worked around blindly.
 
 ## Setup
 
@@ -47,6 +91,18 @@ python src/fetch_usaspending.py
 Output lands in `data/raw/` as JSON (gitignored — not committed).
 
 ## Design notes / decisions
+
+<!--
+Use this section as you go to record *why* you made choices, not just what
+they are. This is the part that actually demonstrates engineering judgment
+to anyone reviewing the project later (including future you).
+
+Example format:
+### Why raw JSON before any database?
+Keeping an unmodified raw layer means I can always re-derive the cleaned
+data without re-hitting the API. Standard pattern in real pipelines
+(raw → staged → modeled).
+-->
 
 ### Why "Award Type" is excluded from the fields request
 
@@ -258,8 +314,8 @@ workaround for this project.
 # 1. Separate venv for Airflow only
 python3.12 -m venv airflow_venv
 source airflow_venv/bin/activate
-pip install "apache-airflow" --constraint \
-  "https://raw.githubusercontent.com/apache/airflow/constraints-latest/constraints-3.12.txt"
+pip install "apache-airflow==3.3.1" --constraint \
+  "https://raw.githubusercontent.com/apache/airflow/constraints-3.3.1/constraints-3.12.txt"
 
 # 2. Point Airflow at this project's dags/ folder and a local AIRFLOW_HOME
 #    (keeps everything self-contained inside the project, same reasoning
